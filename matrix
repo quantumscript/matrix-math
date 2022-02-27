@@ -1,0 +1,270 @@
+# Program 1
+# Class: CS 344 - Operating Systems
+# Author: KC
+# Date: April 19 2018
+# Description: Shell script that manipulates matrices. Operations include producing matrix dimensions, transposing a given matrix, as well as producing the mean and performing addition and multiplication.
+# Input matrix parameters: rectangular, signed integers, tab delimited, not empty, dims up to 100x100
+# Argument 1: "dims", "transpose", "mean", "add", or "multiply"
+# Argument 2: matrix, matrix, matrix, matrix left, matrix left
+# Argument 3: -, -, -, matrix right, matrix right
+
+#!/bin/bash
+
+# Operations ########################################################################
+
+# Dimension function
+# Input [dims, transpose, and mean]: 1 matrix from a file or stdin
+# Output [dims]: print number of rows, space, columns
+dims() {
+	# Error if too many arguments and file given as an argument is not readable
+	if [[ $# -gt 1 ]]; then
+		echo "Error: Need one argument" >&2
+		exit 1
+	elif [[ $# -eq 1 ]] && [[ ! -r $1 ]]; then
+		echo "Error: File is not readable" >&2
+		exit 2
+	else
+		# for row in file
+		countRow=0
+		countCol=0
+		doOnce=0
+		while read row;	do
+			# Use doOnce variable to execute col count once
+			if [[ $doOnce -lt 1 ]]; then
+				# for column in row
+				for col in $row; do
+					((countCol++))
+				done
+				((doOnce++))
+			fi
+			((countRow++))
+		done < "${1:-/dev/stdin}" #Reads from file if argument is given, otherwise read from stdin
+		echo "$countRow $countCol"
+	fi
+}
+
+# Transpose function
+# Input [dims, transpose, and mean]: 1 matrix from a file or stdin
+# Output [transpose]: print the transpose of a matrix
+transpose() {
+	# Error if too many arguments and file given as an argument is not readable
+	if [[ $# -gt 1 ]]; then
+		echo "Error: Need one argument" >&2
+		exit 1
+	elif [[ $# -eq 1 ]] && [[ ! -r $1 ]]; then
+		echo "Error: File is not readable" >&2
+		exit 2
+	else
+		# Create temp files
+		TMP1="TMP1$$"; TMP2="TMP2$$"
+
+		# Read argument or stdin into a temp file TMP1
+		while read line; do
+			echo "$line" >> $TMP1
+		done < "${1:-/dev/stdin}"
+
+		# Get number of columns
+		numCols=$(head -n 1 $TMP1 | tr '\t' '\n' | wc -l)
+		((numCols++)) # Sets up the iterator becuase i must start at 1
+
+		for (( i=1; i<$numCols; i++)); do
+			# Cut the $i field in each line of $TMP1
+			# Translate all new lines into tabs, squeezing repeats
+			# Remove hanging tab character at end of line
+			# Output into TMP
+			cut -d$'\t' -f $i $TMP1 | tr -s '\n' '\t' | ghead -c -1 >> $TMP2
+			echo "" >> "$TMP2"
+		done
+
+		# Output transposed matrix and clean up temporary files
+		cat $TMP2
+		rm -f $TMP1 $TMP2
+	fi
+}
+
+# Mean Function
+# Input [dims, transpose, and mean]: 1 matrix from a file or stdin
+# Output [mean]: print a row vector where each element is the mean of the cols
+mean() {
+	# Error if too many arguments and file given as an argument is not readable
+	if [[ $# -gt 1 ]]; then
+		echo "Error: Need one argument" >&2
+		exit 1
+	elif [[ $# -eq 1 ]] && [[ ! -r $1 ]]; then
+		echo "Error: File is not readable" >&2
+		exit 2
+	else
+		# Call transpose to read columns as rows from argument or stdin
+		FILE="FILE$$"
+		rowFile="rowFile$$"
+		transpose ${1:-/dev/stdin} > "$FILE"
+
+		# For each line (column in original file)
+		while read line; do
+			# For each number in the line add to sum and increment count
+			count=0
+			sum=0
+
+			# Sum number in the line and get count
+			for num in $line; do
+				sum=$((sum + num))
+				((count++))
+			done
+
+			# Calculate the mean and append to rowFile$$
+			mean=$(( (sum + ((count / 2) * (((sum>0) * 2) - 1))) / count ))
+			echo $mean >> "$rowFile"
+		done < "$FILE"
+
+		# Turn column in row vector and output to stdout
+		cat $rowFile | tr '\n' '\t' | ghead -c -1 > newFile$$
+		echo "" >> newFile$$
+		cat newFile$$
+
+		# Clean up temporary files
+		rm -f $FILE $rowFile newFile$$
+	fi
+}
+
+# Add function
+# Input [add, multiply]: 2 matrices from files
+# Output [add]: print matrix adding element-wise
+add() {
+	# Error if not 2 arguments are passed in, unreadable file
+	if [[ $# -ne 2 ]]; then
+		echo "Error: Need to input two matrices" >&2
+		exit 1
+	elif [[ ! -r $1 ]] || [[ ! -r $2 ]]; then
+		echo "Error: File is not readable" >&2
+		exit 2
+	else
+		# Redirect and parse output from dims for each matrix into row and col
+		read dim1r dim1c <<< $(dims $1)
+		read dim2r dim2c <<< $(dims $2)
+		(( dim1r++ )); (( dim2r++ )); (( dim1c++ )); (( dim2c++ ))
+
+		# Error if dims do not match
+		if [ $dim1r -ne $dim2r -o $dim1c -ne $dim2c ]; then
+			echo "Error: Dimensions are not equal" >&2
+			exit 2
+		else
+			#Iterate through rows using row dimension. Use 2 temp ROW files
+			ROW1="ROW1$$"
+			ROW2="ROW2$$"
+			OUTPUT="OUTPUT$$"
+			for (( i=1; i<$dim1r; i++ )); do
+				# Get the i line from both files
+				head -$i $1 | tail -1 > $ROW1
+				head -$i $2 | tail -1 > $ROW2
+
+				# Get the j entry in each column
+				num1=0; num2=0; sum=0
+				stop=$(( dim1c - 1 )) # Stops tab when end of line
+				for (( j=1; j<$dim1c; j++ )); do
+					num1=$(cut -d$'\t' -f $j $ROW1)
+					num2=$(cut -d$'\t' -f $j $ROW2)
+					sum=$(( num1 + num2 ))
+
+					# Append sum to output file along with tab unless at the end of the line
+					if [ $j -eq $stop ]; then
+						echo -n $sum >> $OUTPUT
+					else
+						echo -e -n $sum$'\t' >> $OUTPUT
+					fi
+				done
+				echo "" >> $OUTPUT
+			done
+
+			# Display output file contents and clean up temp files
+			cat $OUTPUT
+			rm -f $ROW1 $ROW2 $OUTPUT
+		fi
+	fi
+}
+
+# Multiply function
+# Input [add, multiply]: 2 matrices from files
+# Output [multiply: print MxP matrix from MxN and NxP input matrices
+multiply() {
+	# Error if not 2 arguments are passed in, unreadable file
+	if [[ $# -ne 2 ]]; then
+		echo "Error: Need to input two matrices" >&2
+		exit 1
+	elif [[ ! -r $1 ]] || [[ ! -r $2 ]]; then
+		echo "Error: File is not readable" >&2
+		exit 2
+	else
+		# Check that the dimensions are compatible
+		read dim1r dim1c <<< $(dims $1)
+		read dim2r dim2c <<< $(dims $2)
+
+		if [ $dim1c -ne $dim2r ]; then
+			echo "Error: Dimensions are not correct" >&2
+			exit 2
+		else
+			# Each row of $1 is multiplied by each column of $2
+			# The dot product (sum of products of row*column) is output to file
+			(( dim1r++ )); (( dim2r++ )); (( dim1c++ )); (( dim2c++ ))
+
+			# Iterate through rows using row dimension.
+			ROW="ROW$$"
+			COL="COL$$"
+			OUTPUT="OUTPUT$$"
+
+			# For each row in $1
+			for (( i=1; i<$dim1r; i++ )); do
+				# Get the i line from $1
+				head -$i $1 | tail -1 > $ROW
+
+				# For the j column of $2
+				stop=$(( dim2c - 1 )) # Stop tab when end of line
+				for (( j=1; j<$dim2c; j++ )); do
+
+					# Get the j column of $2 and make it a row in COL
+					cut -d$'\t' -f $j $2 | tr '\n' '\t' > $COL
+
+					# For the k entry of column j
+					num1=0; num2=0; product=0; sum=0
+					for (( k=1; k<$dim2r; k++ )); do
+						num1=$(cut -d$'\t' -f $k $ROW)
+						num2=$(cut -d$'\t' -f $k $COL)
+						product=$(( num1 * num2 ))
+						sum=$(( sum +  product ))
+					done
+
+					# Output sum
+					if [ $j -eq $stop ]; then
+						echo -n $sum >> $OUTPUT
+					else
+						echo -e -n $sum$'\t' >> $OUTPUT
+					fi
+				done
+				echo "" >> $OUTPUT
+			done
+			cat $OUTPUT
+
+			# Clean up temp files
+			rm -f $ROW $COL $OUTPUT
+		fi
+	fi
+}
+
+# Control statements  ########################################################################
+
+# Trap catch INT HUP and TERM
+trap "rm -f TMP* OUTPUT* ROW* COL*; echo 'Clean up'; exit 1" INT HUP TERM
+
+# Catch bad operation commands
+if [ $1 != "dims" ] && [ $1 != "transpose" ] && [ $1 != "mean" ] && [ $1 != "add" ] && [ $1 != "multiply" ]; then
+	echo "Bad command: enter 'dims', 'transpose', 'mean', 'add', or 'multiply'" >&2
+	exit 1
+fi
+
+# Control statement choose 1 of 5 functions
+case $1 in
+        dims) dims $2 $3;;
+	transpose) transpose $2 $3;;
+	mean) mean $2 $3;;
+	add) add $2 $3 $4;;
+	multiply) multiply $2 $3 $4;;
+esac
